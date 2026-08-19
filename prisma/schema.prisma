@@ -1,0 +1,274 @@
+// Prisma Schema for MiniPOS App
+// Database: PostgreSQL (via Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Role {
+  ADMIN
+  CASHIER
+}
+
+enum DiscountType {
+  NONE
+  PERCENT
+  NOMINAL
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum StockOpnameReason {
+  SESUAI
+  RUSAK
+  KADALUARSA
+  SELISIH_HITUNG
+  RETUR
+  LAINNYA
+}
+
+// ==========================================
+// MODELS
+// ==========================================
+
+/// Model User untuk Petugas Kasir dan Administrator Toko
+model User {
+  id                   String         @id @default(cuid())
+  name                 String
+  email                String?        @unique
+  password             String?        // Password hash untuk Admin portal
+  role                 Role           @default(CASHIER)
+  pin                  String         // 4-digit PIN operasional kasir (e.g. "1234")
+  phone                String?
+  isActive             Boolean        @default(true)
+  totalShiftsCompleted Int            @default(0)
+  totalSalesVolume     Float          @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  // Relasi
+  shifts               CashierShift[]
+  transactions         Transaction[]
+
+  @@map("users")
+}
+
+/// Model Master Produk Ritel & Diskon Promo
+model Product {
+  id               String            @id @default(cuid())
+  sku              String            @unique
+  barcode          String            @unique
+  name             String
+  category         String
+  hpp              Float             // Harga Pokok Penjualan (Modal)
+  price            Float             // Harga Jual Normal
+  isPromo          Boolean           @default(false)
+  discountType     DiscountType      @default(NONE)
+  discountValue    Float             @default(0)
+  promoPrice       Float?            // Harga setelah diskon promo
+  stock            Int               @default(0)
+  minStock         Int               @default(5)
+  unit             String            @default("Pcs") // Pcs, Botol, Kotak, Bungkus, Sak, Kg, dll
+  image            String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  // Relasi
+  transactionItems TransactionItem[]
+  heldCartItems    HeldCartItem[]
+  stockOpnameItems StockOpnameItem[]
+
+  @@map("products")
+}
+
+/// Model Shift Operasional Kasir (Shift 1, Shift 2, Shift 3, Shift 4)
+model CashierShift {
+  id                   String        @id @default(cuid())
+  cashierId            String
+  cashier              User          @relation(fields: [cashierId], references: [id])
+  cashierName          String
+  shiftName            String        // 'Shift 1 (Pagi)', 'Shift 2 (Siang)', 'Shift 3 (Malam)', 'Shift 4 (Gerai 24 Jam)'
+  startTime            DateTime      @default(now())
+  endTime              DateTime?
+  startingCash         Float         @default(0) // Modal Awal Kas di Laci
+  totalCashSales       Float         @default(0)
+  totalQrisSales       Float         @default(0)
+  totalTransactions    Int           @default(0)
+  expectedCashInDrawer Float         @default(0) // startingCash + totalCashSales
+  actualCashCount      Float?        // Hitungan fisik uang kasir (Blind Count)
+  difference           Float?        // Selisih: actual - expected
+  notes                String?
+  status               ShiftStatus   @default(OPEN)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relasi
+  transactions         Transaction[]
+
+  @@map("cashier_shifts")
+}
+
+/// Model Transaksi Penjualan POS Kasir
+model Transaction {
+  id            String            @id @default(cuid())
+  receiptNumber String            @unique // e.g. "TR-20260816-0001"
+  cashierId     String?
+  cashier       User?             @relation(fields: [cashierId], references: [id])
+  cashierName   String
+  shiftId       String?
+  shift         CashierShift?     @relation(fields: [shiftId], references: [id])
+  subtotal      Float
+  discountTotal Float             @default(0)
+  taxTotal      Float             @default(0)
+  total         Float
+  paymentMethod PaymentMethod     @default(CASH)
+  cashReceived  Float?            // Uang tunai yang diserahkan pembeli
+  changeGiven   Float?            // Uang kembalian
+  createdAt     DateTime          @default(now())
+
+  // Relasi
+  items         TransactionItem[]
+
+  @@map("transactions")
+}
+
+/// Model Baris Rincian Item Belanja Transaksi
+model TransactionItem {
+  id              String      @id @default(cuid())
+  transactionId   String
+  transaction     Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product     @relation(fields: [productId], references: [id])
+  productName     String
+  quantity        Int
+  unitPrice       Float       // Harga satuan final (normal / promo)
+  originalPrice   Float       // Harga satuan normal
+  discountPerItem Float       @default(0)
+  discountTotal   Float       @default(0)
+  subtotal        Float
+  notes           String?
+
+  @@map("transaction_items")
+}
+
+/// Model Antrean Transaksi Tertahan (Hold Cart)
+model HeldCart {
+  id           String         @id @default(cuid())
+  label        String         // e.g. "Antrean #1 - Ibu Ratna"
+  customerName String
+  note         String?
+  total        Float
+  heldAt       DateTime       @default(now())
+
+  // Relasi
+  items        HeldCartItem[]
+
+  @@map("held_carts")
+}
+
+/// Model Baris Item pada Keranjang Tertahan
+model HeldCartItem {
+  id              String   @id @default(cuid())
+  heldCartId      String
+  heldCart        HeldCart @relation(fields: [heldCartId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  productName     String
+  quantity        Int
+  unitPrice       Float
+  originalPrice   Float
+  discountPerItem Float    @default(0)
+  discountTotal   Float    @default(0)
+  subtotal        Float
+  notes           String?
+
+  @@map("held_cart_items")
+}
+
+/// Model Sesi Audit Stok Opname Fisik
+model StockOpnameAudit {
+  id                    String            @id @default(cuid())
+  auditDate             DateTime          @default(now())
+  auditorName           String
+  notes                 String?
+  totalDiscrepancyValue Float             @default(0) // Total nilai kerugian / selisih
+
+  // Relasi
+  items                 StockOpnameItem[]
+
+  @@map("stock_opname_audits")
+}
+
+/// Model Rincian Item pada Audit Stok Opname
+model StockOpnameItem {
+  id            String             @id @default(cuid())
+  auditId       String?
+  audit         StockOpnameAudit?  @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product            @relation(fields: [productId], references: [id])
+  productName   String
+  category      String
+  systemStock   Int                // Jumlah stok tercatat sistem
+  physicalStock Int                // Jumlah stok fisik di rak/gudang
+  difference    Int                // physical - system
+  hpp           Float              // Modal
+  lossValue     Float              // difference * hpp (jika minus)
+  reason        StockOpnameReason  @default(SESUAI)
+  notes         String?
+  createdAt     DateTime           @default(now())
+
+  @@map("stock_opname_items")
+}
+
+/// Model Pengaturan Toko & Master Jam 4 Shift
+model StoreSettings {
+  id           String   @id @default("default-store")
+  storeName    String   @default("TOKOKU")
+  tagline      String   @default("Minimarket Hemat, Cepat & Bersahabat")
+  address      String   @default("Jl. Merdeka Raya No. 45, Jakarta Selatan")
+  phone        String   @default("0812-3456-7890")
+  footerNote   String   @default("Barang yang sudah dibeli tidak dapat ditukar kecuali ada perjanjian. Terima kasih atas kunjungan Anda!")
+  enableTax    Boolean  @default(true)
+  taxPercent   Float    @default(11)
+  qrisImageUrl String   @default("https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=00020101021226580016ID.CO.MINIPOS.WWW01189360099900000000015204581253033605802ID5918MINIPOS+TOKOKU6007JAKARTA61051234062070703A016304C742")
+  
+  // Konfigurasi 4 Shift Operasional
+  shift1Name   String   @default("Shift 1 (Pagi)")
+  shift1Start  String   @default("07:00")
+  shift1End    String   @default("15:00")
+  
+  shift2Name   String   @default("Shift 2 (Siang)")
+  shift2Start  String   @default("15:00")
+  shift2End    String   @default("23:00")
+  
+  shift3Name   String   @default("Shift 3 (Malam)")
+  shift3Start  String   @default("23:00")
+  shift3End    String   @default("07:00")
+  enableShift3 Boolean  @default(true)
+  
+  shift4Name   String   @default("Shift 4 (Gerai 24 Jam)")
+  shift4Start  String   @default("00:00")
+  shift4End    String   @default("24:00")
+  enableShift4 Boolean  @default(true)
+  
+  updatedAt    DateTime @updatedAt
+
+  @@map("store_settings")
+}
