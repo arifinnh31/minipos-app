@@ -1,4 +1,4 @@
-# 🛒 TOKOKU MINIPOS - Sistem Kasir & Manajemen Ritel Cepat & Andal
+# 🛒 MiniPOS - Sistem Kasir Minimarket Ritel Cepat & Andal
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.3-black?style=for-the-badge&logo=next.js)
 ![React](https://img.shields.io/badge/React-19-blue?style=for-the-badge&logo=react)
